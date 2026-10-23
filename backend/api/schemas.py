@@ -5,3 +5,9 @@ class UploadResponse(BaseModel):
     document_id: str
     status: str
     message: str
+
+
+class TextVideoRequest(BaseModel):
+    text: str
+    title: str | None = None
+    narration: bool = True

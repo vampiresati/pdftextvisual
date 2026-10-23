@@ -1,60 +1,14 @@
 "use client";
-
 import { ChangeEvent, DragEvent, useEffect, useState } from "react";
-
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-type Job = { status: string; progress: number; current_step?: string; error?: string };
-type Document = { title?: string; beats?: string[]; page_count?: number; video_url?: string; filename: string };
-
-export default function Home() {
-  const [file, setFile] = useState<File | null>(null);
-  const [jobId, setJobId] = useState<string>();
-  const [documentId, setDocumentId] = useState<string>();
-  const [job, setJob] = useState<Job>();
-  const [document, setDocument] = useState<Document>();
-  const [error, setError] = useState<string>();
-
-  useEffect(() => {
-    if (!jobId || job?.status === "completed" || job?.status === "failed") return;
-    const poll = async () => {
-      const response = await fetch(`${API}/api/status/${jobId}`);
-      if (!response.ok) return;
-      const next = await response.json(); setJob(next);
-      if (next.status === "completed" && documentId) {
-        const doc = await fetch(`${API}/api/documents/${documentId}`); setDocument(await doc.json());
-      }
-    };
-    poll(); const timer = window.setInterval(poll, 1200); return () => window.clearInterval(timer);
-  }, [jobId, job?.status, documentId]);
-
-  function choose(next: File | undefined) {
-    setError(undefined); setJob(undefined); setDocument(undefined); setJobId(undefined);
-    if (!next) return;
-    if (next.type !== "application/pdf" && !next.name.toLowerCase().endsWith(".pdf")) { setError("Please select a PDF file."); return; }
-    setFile(next);
-  }
-  async function submit() {
-    if (!file) return;
-    setError(undefined); const data = new FormData(); data.append("file", file);
-    const response = await fetch(`${API}/api/uploads`, { method: "POST", body: data });
-    const payload = await response.json();
-    if (!response.ok) { setError(payload.detail || "Upload failed."); return; }
-    setJobId(payload.job_id); setDocumentId(payload.document_id); setJob({ status: "queued", progress: 0, current_step: "Queued" });
-  }
-  function drop(event: DragEvent<HTMLLabelElement>) { event.preventDefault(); choose(event.dataTransfer.files[0]); }
-  return <main>
-    <div className="orb one" /><div className="orb two" />
-    <nav><span className="brand"><i>◇</i> PDFVisual</span><span>PDF → visual explanation</span></nav>
-    <section className="hero"><p className="eyebrow">TURN DOCUMENTS INTO MOTION</p><h1>Your PDF, <em>made visual.</em></h1><p className="lede">Upload a research paper, report, or lesson. We extract its central ideas and render a concise animated walkthrough.</p>
-      <label className={`dropzone ${file ? "ready" : ""}`} onDragOver={e => e.preventDefault()} onDrop={drop}>
-        <input type="file" accept="application/pdf" onChange={(e: ChangeEvent<HTMLInputElement>) => choose(e.target.files?.[0])} />
-        <span className="uploadIcon">↑</span><strong>{file ? file.name : "Drop your PDF here"}</strong><small>{file ? `${(file.size / 1024 / 1024).toFixed(1)} MB · ready to visualize` : "or browse files · PDF up to 25 MB"}</small>
-      </label>
-      <button disabled={!file || Boolean(jobId)} onClick={submit}>{jobId ? "Visualizing…" : "Create visual video →"}</button>
-      {error && <p className="error">{error}</p>}
-    </section>
-    {job && <section className="card progress"><div><p className="eyebrow">PROCESSING</p><h2>{job.status === "completed" ? "Your visual is ready" : job.current_step}</h2></div><b>{job.progress}%</b><div className="bar"><span style={{ width: `${job.progress}%` }} /></div>{job.error && <p className="error">{job.error}</p>}</section>}
-    {document?.video_url && <section className="card result"><div><p className="eyebrow">VIDEO EXPLANATION</p><h2>{document.title}</h2><p>{document.page_count} pages · {document.beats?.length} key ideas</p></div><video controls playsInline src={`${API}${document.video_url}`} /><ol>{document.beats?.map(beat => <li key={beat}>{beat}</li>)}</ol></section>}
-    <footer>Built on the asynchronous processing and Manim rendering patterns from arxivpa, adapted for private PDF uploads.</footer>
-  </main>;
+type Job={status:string;progress:number;current_step?:string;error?:string}; type Doc={title?:string;beats?:string[];page_count?:number;video_url?:string;filename:string;source?:string;narration_requested?:boolean;narration_ready?:boolean};
+export default function Home(){
+ const [file,setFile]=useState<File|null>(null),[text,setText]=useState(""),[mode,setMode]=useState<"pdf"|"text">("pdf"),[narration,setNarration]=useState(true),[jobId,setJobId]=useState<string>(),[documentId,setDocumentId]=useState<string>(),[job,setJob]=useState<Job>(),[document,setDocument]=useState<Doc>(),[error,setError]=useState<string>();
+ useEffect(()=>{if(!jobId||job?.status==="completed"||job?.status==="failed")return;const poll=async()=>{const r=await fetch(`${API}/api/status/${jobId}`);if(!r.ok)return;const next=await r.json();setJob(next);if(next.status==="completed"&&documentId){const d=await fetch(`${API}/api/documents/${documentId}`);setDocument(await d.json())}};poll();const t=window.setInterval(poll,1200);return()=>window.clearInterval(t)},[jobId,job?.status,documentId]);
+ const reset=(next:"pdf"|"text")=>{setMode(next);setError(undefined);setJob(undefined);setDocument(undefined);setJobId(undefined)};
+ function choose(next:File|undefined){setError(undefined);setJob(undefined);setDocument(undefined);setJobId(undefined);if(!next)return;if(next.type!=="application/pdf"&&!next.name.toLowerCase().endsWith(".pdf")){setError("Please select a PDF file.");return}setFile(next)}
+ async function submitPdf(){if(!file)return;const data=new FormData();data.append("file",file);data.append("narration",String(narration));const r=await fetch(`${API}/api/uploads`,{method:"POST",body:data});const p=await r.json();if(!r.ok){setError(p.detail||"Upload failed.");return}setJobId(p.job_id);setDocumentId(p.document_id);setJob({status:"queued",progress:0,current_step:"Queued"})}
+ async function submitText(){if(!text.trim())return;const r=await fetch(`${API}/api/text-videos`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text,narration})});const p=await r.json();if(!r.ok){setError(p.detail||"Could not create the text video.");return}setJobId(p.job_id);setDocumentId(p.document_id);setJob({status:"queued",progress:0,current_step:"Queued"})}
+ function drop(e:DragEvent<HTMLLabelElement>){e.preventDefault();choose(e.dataTransfer.files[0])}
+ return <main className="appShell"><div className="orb one"/><div className="orb two"/><aside className="sidebar"><span className="brand"><i>◇</i> PDFVisual</span><p>CREATE</p><button className={mode==="pdf"?"menu active":"menu"} onClick={()=>reset("pdf")}>▱ &nbsp; PDF upload</button><button className={mode==="text"?"menu active":"menu"} onClick={()=>reset("text")}>✎ &nbsp; Text to video</button><small>Turn a document or your own words into a short visual explanation.</small></aside><div className="content"><nav><span>{mode==="text"?"Text → narrated visual":"PDF → visual explanation"}</span></nav><section className="hero"><p className="eyebrow">TURN IDEAS INTO MOTION</p><h1>Your ideas, <em>made visual.</em></h1><p className="lede">{mode==="text"?"Write your script or notes. We turn the main ideas into an animated video, with an optional AI voiceover.":"Upload a research paper, report, or lesson. We extract its central ideas and render a concise animated walkthrough."}</p>{mode==="pdf"?<><label className={`dropzone ${file?"ready":""}`} onDragOver={e=>e.preventDefault()} onDrop={drop}><input type="file" accept="application/pdf" onChange={(e:ChangeEvent<HTMLInputElement>)=>choose(e.target.files?.[0])}/><span className="uploadIcon">↑</span><strong>{file?file.name:"Drop your PDF here"}</strong><small>{file?`${(file.size/1024/1024).toFixed(1)} MB · ready to visualize`:"or browse files · PDF up to 25 MB"}</small></label><div className="textOptions"><label><input type="checkbox" checked={narration} onChange={e=>setNarration(e.target.checked)}/> Add AI voiceover</label></div><button disabled={!file||Boolean(jobId)} onClick={submitPdf}>{jobId?"Visualizing…":narration?"Create narrated video →":"Create visual video →"}</button></>:<><textarea value={text} onChange={e=>setText(e.target.value)} placeholder="Type or paste the text you want explained…" maxLength={8000}/><div className="textOptions"><label><input type="checkbox" checked={narration} onChange={e=>setNarration(e.target.checked)}/> Add AI voiceover</label><small>{text.length}/8,000</small></div><button disabled={!text.trim()||Boolean(jobId)} onClick={submitText}>{jobId?"Visualizing…":narration?"Create narrated video →":"Create visual video →"}</button></>}{error&&<p className="error">{error}</p>}</section>{job&&<section className="card progress"><div><p className="eyebrow">PROCESSING</p><h2>{job.status==="completed"?"Your visual is ready":job.current_step}</h2></div><b>{job.progress}%</b><div className="bar"><span style={{width:`${job.progress}%`}}/></div>{job.error&&<p className="error">{job.error}</p>}</section>}{document?.video_url&&<section className="card result"><div><p className="eyebrow">VIDEO EXPLANATION</p><h2>{document.title}</h2><p>{document.source==="text"?"Text input":`${document.page_count} pages`} · {document.beats?.length} key ideas{document.narration_ready?" · voiceover included":document.narration_requested?" · voiceover unavailable":""}</p></div><video controls playsInline src={`${API}${document.video_url}`}/><ol>{document.beats?.map(beat=><li key={beat}>{beat}</li>)}</ol></section>}<footer>Built on the asynchronous processing and Manim rendering patterns from arxivpa, adapted for private PDF uploads.</footer></div></main>
 }

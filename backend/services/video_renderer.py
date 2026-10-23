@@ -7,6 +7,36 @@ from pathlib import Path
 
 from core.config import OUTPUTS
 
+
+async def add_narration(video_path: Path, document_id: str, text: str) -> bool:
+    """Create an Edge neural voice track and mux it into the MP4.
+
+    Edge TTS is intentionally optional: a visual video still succeeds on
+    machines without internet access or the package installed.
+    """
+    try:
+        import edge_tts
+    except ImportError:
+        return False
+    audio_path = OUTPUTS / f"{document_id}.mp3"
+    try:
+        await edge_tts.Communicate(text, voice="en-US-JennyNeural").save(str(audio_path))
+        narrated = OUTPUTS / f"{document_id}.narrated.mp4"
+        result = await asyncio.to_thread(subprocess.run, [
+            "ffmpeg", "-y", "-i", str(video_path), "-i", str(audio_path),
+            "-filter_complex", "[0:v]tpad=stop_mode=clone:stop_duration=120[v]",
+            "-map", "[v]", "-map", "1:a", "-c:v", "libx264", "-c:a", "aac",
+            "-shortest", str(narrated),
+        ], capture_output=True, text=True, timeout=180)
+        if result.returncode:
+            return False
+        shutil.move(narrated, video_path)
+        return True
+    except Exception:
+        return False
+    finally:
+        audio_path.unlink(missing_ok=True)
+
 def build_scene_source(title: str, beats: list[str]) -> str:
     title_json, beats_json = json.dumps(title), json.dumps(beats)
     return f'''from manim import *
@@ -32,7 +62,7 @@ class PDFVisualScene(Scene):
         self.wait(2.0)
 '''
 
-async def render_video(document_id: str, title: str, beats: list[str]) -> Path:
+async def render_video(document_id: str, title: str, beats: list[str], narration_text: str | None = None) -> tuple[Path, bool]:
     # Keep Manim's generated Python source outside the backend directory.  In
     # development, uvicorn --reload watches Python files below the backend
     # directory; putting the source in OUTPUTS causes a reload mid-job and
@@ -52,4 +82,5 @@ async def render_video(document_id: str, title: str, beats: list[str]) -> Path:
         raise RuntimeError("Manim finished without producing an MP4.")
     video_path = OUTPUTS / f"{document_id}.mp4"
     shutil.copy2(rendered, video_path)
-    return video_path
+    narration_ready = await add_narration(video_path, document_id, narration_text) if narration_text else False
+    return video_path, narration_ready

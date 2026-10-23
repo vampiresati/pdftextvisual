@@ -2,18 +2,18 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
-from api.schemas import UploadResponse
+from api.schemas import TextVideoRequest, UploadResponse
 from core.config import MAX_UPLOAD_BYTES, UPLOADS
 from core.state import documents, jobs, utc_now
-from jobs.worker import process_upload
+from jobs.worker import process_text, process_upload
 
 router = APIRouter(prefix="/api")
 
 @router.post("/uploads", response_model=UploadResponse, status_code=202)
-async def upload_pdf(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+async def upload_pdf(background_tasks: BackgroundTasks, file: UploadFile = File(...), narration: bool = Form(True)):
     filename = file.filename or "upload.pdf"
     if file.content_type not in {"application/pdf", "application/x-pdf"} and not filename.lower().endswith(".pdf"):
         raise HTTPException(415, "Upload a PDF file.")
@@ -25,10 +25,27 @@ async def upload_pdf(background_tasks: BackgroundTasks, file: UploadFile = File(
     document_id, job_id = uuid.uuid4().hex, uuid.uuid4().hex
     pdf_path = UPLOADS / f"{document_id}.pdf"
     pdf_path.write_bytes(content)
-    documents[document_id] = {"document_id": document_id, "filename": filename, "uploaded_at": utc_now()}
+    documents[document_id] = {"document_id": document_id, "filename": filename, "uploaded_at": utc_now(), "narration_requested": narration}
     jobs[job_id] = {"job_id": job_id, "document_id": document_id, "status": "queued", "progress": 0, "current_step": "Queued", "created_at": utc_now()}
-    background_tasks.add_task(process_upload, job_id, document_id, pdf_path)
+    background_tasks.add_task(process_upload, job_id, document_id, pdf_path, narration)
     return UploadResponse(job_id=job_id, document_id=document_id, status="queued", message="PDF accepted and queued for visualization.")
+
+
+@router.post("/text-videos", response_model=UploadResponse, status_code=202)
+async def create_text_video(background_tasks: BackgroundTasks, payload: TextVideoRequest):
+    text = " ".join(payload.text.split())
+    if len(text) < 12:
+        raise HTTPException(422, "Write at least a short sentence before creating a video.")
+    if len(text) > 8_000:
+        raise HTTPException(422, "Text must be 8,000 characters or fewer.")
+    document_id, job_id = uuid.uuid4().hex, uuid.uuid4().hex
+    documents[document_id] = {
+        "document_id": document_id, "filename": "text-to-video", "uploaded_at": utc_now(),
+        "source": "text", "narration_requested": payload.narration,
+    }
+    jobs[job_id] = {"job_id": job_id, "document_id": document_id, "status": "queued", "progress": 0, "current_step": "Queued", "created_at": utc_now()}
+    background_tasks.add_task(process_text, job_id, document_id, text, payload.title, payload.narration)
+    return UploadResponse(job_id=job_id, document_id=document_id, status="queued", message="Text accepted and queued for visualization.")
 
 @router.get("/status/{job_id}")
 async def job_status(job_id: str):
